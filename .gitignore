@@ -1,0 +1,8 @@
+# Outputs
+/target
+
+# IDE stuff
+.idea
+
+# Mac droppings
+.DS_Store

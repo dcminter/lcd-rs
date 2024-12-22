@@ -1,0 +1,7 @@
+[package]
+name = "lcd-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Simple program to control a 16x2 LCD using the typical Hitachi controller"
+
+[dependencies]
