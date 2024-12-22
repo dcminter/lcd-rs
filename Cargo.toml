@@ -5,3 +5,4 @@ edition = "2021"
 description = "Simple program to control a 16x2 LCD using the typical Hitachi controller"
 
 [dependencies]
+gpio-cdev = "0.6.0"
