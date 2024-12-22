@@ -16,17 +16,6 @@ tested it on that platform as well.
 
 This is all on the Pi 5, so absolutely no guarantees it will work on other hardware.
 
-## Choices
-
-I'm going to use crate [gpio-cdev](https://crates.io/crates/gpio-cdev) for the following reasons:
-
-* Fairly current, with recent commits
-* Close to the current base Linux mechanisms
-* From the Rust-Embedded working group
-    * [Working Group](https://www.rust-lang.org/governance/wgs/embedded)
-    * [Working Group Repos](https://github.com/rust-embedded)
-* Looks like it gets enough eyes for anything nefarious to be spotted
-
 ## Status...
 
 This isn't very elegant, but it works (on my machine, obv.)
@@ -74,6 +63,35 @@ gpiochip0 - 54 lines:
 ...
 etc.
 ```
+
+### Toggles
+
+In order to send data to the LCD I have to take the Enable pin (E) high and then back low after setting the data pins
+(and the register select pin to dictate if I'm sending instructions or characters).
+
+During the after-setup steps in the flow chart in Figure 24 on page 46 of the HD44780U datasheet, there are some 
+defined minimum times for the steps, 4.1ms and 100µs respectively.
+
+Some of the instructions in Table 6 on 24 of the datasheet have defined execution times (mostly around 37µs). I tried
+setting a toggle time of 40µs but got garbled data - so I'm probably misunderstanding something. Working with a higher
+value of 40ms (i.e. 1000x higher) that I cribbed from someone else's Python script it works fine.
+
+I don't think there's a documented minimum for sending the character data - so for now I'm using that same 40ms delay.
+
+In order to avoid repetition of the toggle call I defined the `send_4` function to accept a closure, then in the usage
+I either define the closure in the call to `send_4` or reference a single closure repeatedly for the various `send_4`
+calls. This seems to work ok, but will hopefully go away again once I have the busy-signal stuff working. 
+
+### Choices
+
+I'm using crate [gpio-cdev](https://crates.io/crates/gpio-cdev) for the following reasons:
+
+* Fairly current, with recent commits
+* Close to the current base Linux mechanisms
+* From the Rust-Embedded working group
+  * [Working Group](https://www.rust-lang.org/governance/wgs/embedded)
+  * [Working Group Repos](https://github.com/rust-embedded)
+* Looks like it gets enough eyes for anything nefarious to be spotted
 
 ## Python etc.
 

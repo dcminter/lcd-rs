@@ -43,8 +43,9 @@ fn toggle(line: &LineHandle, duration: Duration) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn send_4(values: &[u8; 4], data_handle: &MultiLineHandle) -> Result<(), Box<dyn Error>> {
-    Ok(data_handle.set_values(values)?)
+fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(values: &[u8; 4], data_handle: &MultiLineHandle, toggler: F) -> Result<(), Box<dyn Error>> {
+    data_handle.set_values(values)?;
+    toggler()
 }
 
 fn setup_lcd(
@@ -54,41 +55,46 @@ fn setup_lcd(
 ) -> Result<(), Box<dyn Error>> {
     let _ = instruction_register(register_select_line)?;
 
+    // Mostly we're being conservative and using this 40ms toggle (i.e. set ENABLE pin high for 40ms). Elsewhere during the reset I'm using the "more than" delays specified by the flow diagram in the HD44780U datasheet
+    let toggle_40ms = || toggle(&enable, Duration::from_millis(40));
+
+    ////
     // Handle post-reset initialization into 4 bit mode
-    data.set_values(&[0, 0, 1, 1])?; // Post RESET 'A' - Device thinks this is 0011 0000, same as 8 bit mode
-    toggle(&enable, Duration::from_micros(4100))?; // Wait "more than 4.1 milliseconds"
-    data.set_values(&[0, 0, 1, 1])?; // Post RESET 'B' - Device thinks this is 0011 0000, same as 8 bit mode
-    toggle(&enable, Duration::from_micros(100))?; // Wait "more than 100 microseconds"
-    data.set_values(&[0, 0, 1, 1])?; // Post RESET 'C' - Device thinks this is 0011 0000, same as 8 bit mode
-    toggle(&enable, Duration::from_millis(40))?;
-    data.set_values(&[0, 0, 1, 0])?; // In 8 bit mode this would need to be 0001, in either mode 0010 moves us into 4 bit mode...
-    toggle(&enable, Duration::from_millis(40))?;
 
+    // Post RESET 'A' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 4.1 milliseconds"
+    send_4(&[0, 0, 1, 1], data, || toggle(&enable, Duration::from_micros(4100)))?;
+
+    // Post RESET 'B' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 100 microseconds"
+    send_4(&[0, 0, 1, 1], data, || toggle(&enable, Duration::from_micros(100)))?;
+
+    // Post RESET 'C' - Device thinks this is 0011 0000, same as 8 bit mode
+    send_4(&[0, 0, 1, 1], data, toggle_40ms)?;
+
+    // In 8 bit mode this would need to be 0001, in either mode 0010 moves us into 4 bit mode...
+    send_4(&[0, 0, 1, 0], data, toggle_40ms)?;
+
+    ////
     // Now do the actual post-reset 4-bit mode setup (always HI then LO as this is big-endian)
-    data.set_values(&[0, 0, 1, 0])?; // Function Set  ... DATA LENGTH = 4 bits, LINES = 2, FONT = 5x8
-    toggle(&enable, Duration::from_millis(40))?;
-    data.set_values(&[1, 0, 0, 0])?;
-    toggle(&enable, Duration::from_millis(40))?;
 
-    data.set_values(&[0, 0, 0, 0])?; // Display On/off .. DISPLAY ON, CURSOR OFF, BLINK OFF
-    toggle(&enable, Duration::from_millis(40))?;
-    data.set_values(&[1, 1, 0, 0])?;
-    toggle(&enable, Duration::from_millis(40))?;
+    // Function Set  ... DATA LENGTH = 4 bits, LINES = 2, FONT = 5x8
+    send_4(&[0, 0, 1, 0], data, toggle_40ms)?;
+    send_4(&[1, 0, 0, 0], data, toggle_40ms)?;
 
-    data.set_values(&[0, 0, 0, 0])?; // Clear display
-    toggle(&enable, Duration::from_millis(40))?;
-    data.set_values(&[0, 0, 0, 1])?;
-    toggle(&enable, Duration::from_millis(40))?;
+    // Display On/off .. DISPLAY ON, CURSOR OFF, BLINK OFF
+    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4(&[1, 1, 0, 0], data, toggle_40ms)?;
 
-    data.set_values(&[0, 0, 0, 0])?; // Set cursor to home position
-    toggle(&enable, Duration::from_millis(40))?;
-    data.set_values(&[0, 0, 1, 0])?;
-    toggle(&enable, Duration::from_millis(40))?;
+    // Clear display
+    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 0, 1], data, toggle_40ms)?;
 
-    data.set_values(&[0, 0, 0, 0])?; // Entry Mode ... INCREMENT, SHIFT = OFF (same as after RESET, could omit this)
-    toggle(&enable, Duration::from_millis(40))?;
-    data.set_values(&[0, 1, 1, 0])?;
-    toggle(&enable, Duration::from_millis(40))?;
+    // Set cursor to home position
+    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 1, 0], data, toggle_40ms)?;
+
+    // Entry Mode ... INCREMENT, SHIFT = OFF (same as after RESET, could omit this)
+    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4(&[0, 1, 1, 0], data, toggle_40ms)?;
 
     Ok(())
 }
@@ -101,7 +107,8 @@ fn send_char(
     if character.is_ascii() {
         let ascii = character as u8;
 
-        // Not very classy, but it's easy (for me) to understand and it works...
+        // Not very classy, but it's easy (for me) to understand and it works... sticking a fn
+        // in doesn't make it any clearer, so I'm keeping like this until shown a better way!
         let high: [u8; 4] = [
             if ascii & 0b10000000 > 0 { 1 } else { 0 },
             if ascii & 0b01000000 > 0 { 1 } else { 0 },
@@ -116,10 +123,10 @@ fn send_char(
             if ascii & 0b00000001 > 0 { 1 } else { 0 },
         ];
 
-        send_4(&high, data_handle)?;
-        toggle(enable_handle, Duration::from_millis(40))?;
-        send_4(&low, data_handle)?;
-        toggle(enable_handle, Duration::from_millis(40))?;
+        let toggler = || toggle(enable_handle, Duration::from_millis(40));
+
+        send_4(&high, data_handle, toggler)?;
+        send_4(&low, data_handle, toggler)?;
     }
 
     Ok(())
