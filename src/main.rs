@@ -51,16 +51,41 @@ fn toggle(line: &LineHandle, duration: Duration) -> Result<(), Box<dyn Error>> {
 fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
     values: &[u8; 4],
     data: &(Line, MultiLineHandle),
+    read_write_handle: &LineHandle,
     toggler: F,
 ) -> Result<(), Box<dyn Error>> {
     // D7 is special... because in INPUT mode it's the busy flag.
-    let d7 = data.0.request(LineRequestFlags::OUTPUT, LOW, "lcd_rs_data_d7")?;
-    d7.set_value(values[0])?;
-    data.1.set_values(&values[1..])?;
-    toggler()
+    {
+        let d7 = data.0.request(LineRequestFlags::OUTPUT, LOW, "lcd_rs_data_d7")?;
+        d7.set_value(values[0])?;
+        data.1.set_values(&values[1..])?;
+        toggler()
+    }?;
+
+/*
+    THIS is the bit that I think may not work; I think the rest should work ok - so let's try
+    without this bit first and see if the behaviour is still ok.
+
+    // Flip RW flag into READ mode and read D7 until we get a non-busy state
+    read_write_handle.set_value(READ)?;
+    {
+        let busy = data.0.request(LineRequestFlags::INPUT, LOW, "lcd_rs_data_busy")?;
+        while busy.get_value()? > 0 {
+            println!("Busy");
+        }
+    }
+
+    // Put the RW flag back into WRITE mode
+    println!("Not busy");
+    read_write_handle.set_value(WRITE)?;
+    // But we're still in WRITE mode...
+
+ */
+    Ok(())
 }
 
 fn setup_lcd(
+    read_write_handle: &LineHandle,
     register_select_line: &Line,
     data: &(Line, MultiLineHandle),
     enable: &LineHandle,
@@ -74,43 +99,43 @@ fn setup_lcd(
     // Handle post-reset initialization into 4 bit mode
 
     // Post RESET 'A' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 4.1 milliseconds"
-    send_4(&[0, 0, 1, 1], data, || {
+    send_4(&[0, 0, 1, 1], data, read_write_handle, || {
         toggle(&enable, Duration::from_micros(4100))
     })?;
 
     // Post RESET 'B' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 100 microseconds"
-    send_4(&[0, 0, 1, 1], data, || {
+    send_4(&[0, 0, 1, 1], data, read_write_handle, || {
         toggle(&enable, Duration::from_micros(100))
     })?;
 
     // Post RESET 'C' - Device thinks this is 0011 0000, same as 8 bit mode
-    send_4(&[0, 0, 1, 1], data, toggle_40ms)?;
+    send_4(&[0, 0, 1, 1], data, read_write_handle, toggle_40ms)?;
 
     // In 8 bit mode this would need to be 0001, in either mode 0010 moves us into 4 bit mode...
-    send_4(&[0, 0, 1, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 1, 0], data, read_write_handle, toggle_40ms)?;
 
     ////
     // Now do the actual post-reset 4-bit mode setup (always HI then LO as this is big-endian)
 
     // Function Set  ... DATA LENGTH = 4 bits, LINES = 2, FONT = 5x8
-    send_4(&[0, 0, 1, 0], data, toggle_40ms)?;
-    send_4(&[1, 0, 0, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 1, 0], data, read_write_handle, toggle_40ms)?;
+    send_4(&[1, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
 
     // Display On/off .. DISPLAY ON, CURSOR OFF, BLINK OFF
-    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
-    send_4(&[1, 1, 0, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
+    send_4(&[1, 1, 0, 0], data, read_write_handle, toggle_40ms)?;
 
     // Clear display
-    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
-    send_4(&[0, 0, 0, 1], data, toggle_40ms)?;
+    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
+    send_4(&[0, 0, 0, 1], data, read_write_handle, toggle_40ms)?;
 
     // Set cursor to home position
-    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
-    send_4(&[0, 0, 1, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
+    send_4(&[0, 0, 1, 0], data, read_write_handle, toggle_40ms)?;
 
     // Entry Mode ... INCREMENT, SHIFT = OFF (same as after RESET, could omit this)
-    send_4(&[0, 0, 0, 0], data, toggle_40ms)?;
-    send_4(&[0, 1, 1, 0], data, toggle_40ms)?;
+    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
+    send_4(&[0, 1, 1, 0], data, read_write_handle, toggle_40ms)?;
 
     Ok(())
 }
@@ -118,6 +143,7 @@ fn setup_lcd(
 fn send_char(
     character: char,
     data: &(Line, MultiLineHandle),
+    read_write_handle: &LineHandle,
     enable_handle: &LineHandle,
 ) -> Result<(), Box<dyn Error>> {
     if character.is_ascii() {
@@ -141,8 +167,8 @@ fn send_char(
 
         let toggler = || toggle(enable_handle, Duration::from_millis(40));
 
-        send_4(&high, data, toggler)?;
-        send_4(&low, data, toggler)?;
+        send_4(&high, data, read_write_handle, toggler)?;
+        send_4(&low, data, read_write_handle, toggler)?;
     }
 
     Ok(())
@@ -150,6 +176,7 @@ fn send_char(
 
 fn send_text_to_lcd(
     text: &str,
+    read_write_handle: &LineHandle,
     register_select_line: &Line,
     data: &(Line, MultiLineHandle),
     enable_handle: &LineHandle,
@@ -157,7 +184,7 @@ fn send_text_to_lcd(
     let _ = data_register(register_select_line)?;
 
     for c in text.chars() {
-        send_char(c, data, enable_handle)?;
+        send_char(c, data, read_write_handle, enable_handle)?;
     }
 
     Ok(())
@@ -184,15 +211,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let data = (d7_data_line, data_handle);
 
     let enable_handle = enable_line.request(LineRequestFlags::OUTPUT, DISABLED, "lcd_rs_enable")?;
-    let _ = read_write_line.request(LineRequestFlags::OUTPUT, WRITE, "lcd_rs_read_write")?;
+    let read_write_handle = read_write_line.request(LineRequestFlags::OUTPUT, WRITE, "lcd_rs_read_write")?;
     // Verified that the board still works ok with the RW line held low via the GPIO pin
 
     println!("Setup the LCD");
-    setup_lcd(&register_select_line, &data, &enable_handle)?;
+    setup_lcd(&read_write_handle, &register_select_line, &data, &enable_handle)?;
 
     println!("Start the text output");
     send_text_to_lcd(
         "Hello, World!",
+        &read_write_handle,
         &register_select_line,
         &data,
         &enable_handle,
