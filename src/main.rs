@@ -3,18 +3,23 @@ use std::error::Error;
 use std::thread::sleep;
 use std::time::Duration;
 
-const REGISTER_SELECT: u32 = 20;
-const ENABLE: u32 = 21;
-const D4: u32 = 25;
-const D5: u32 = 8;
-const D6: u32 = 7;
-const D7: u32 = 1;
+// Define GPIO pins to use
+const REGISTER_SELECT: u32 = 20; // Pin 38 on Pi
+const ENABLE: u32 = 21; // Pin 40 on Pi
+const D4: u32 = 25; // Pin 22 on Pi
+const D5: u32 = 8; // Pin 24 on Pi
+const D6: u32 = 7; // Pin 26 on Pi
+const D7: u32 = 1; // Pin 28 on Pi
+const READ_WRITE_SELECT: u32 = 12; // Pin 32 on Pi
 
+// Define meaning of signals on pins
 const INSTRUCTION_REGISTER: u8 = 0;
 const DATA_REGISTER: u8 = 1;
 const ENABLED: u8 = 0;
 const DISABLED: u8 = 1;
 const LOW: u8 = 0;
+const READ: u8 = 1;
+const WRITE: u8 = 0;
 
 const STANDARD_PI_GPIO_DEVICE_PATH: &str = "/dev/gpiochip0";
 
@@ -43,7 +48,11 @@ fn toggle(line: &LineHandle, duration: Duration) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(values: &[u8; 4], data_handle: &MultiLineHandle, toggler: F) -> Result<(), Box<dyn Error>> {
+fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
+    values: &[u8; 4],
+    data_handle: &MultiLineHandle,
+    toggler: F,
+) -> Result<(), Box<dyn Error>> {
     data_handle.set_values(values)?;
     toggler()
 }
@@ -62,10 +71,14 @@ fn setup_lcd(
     // Handle post-reset initialization into 4 bit mode
 
     // Post RESET 'A' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 4.1 milliseconds"
-    send_4(&[0, 0, 1, 1], data, || toggle(&enable, Duration::from_micros(4100)))?;
+    send_4(&[0, 0, 1, 1], data, || {
+        toggle(&enable, Duration::from_micros(4100))
+    })?;
 
     // Post RESET 'B' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 100 microseconds"
-    send_4(&[0, 0, 1, 1], data, || toggle(&enable, Duration::from_micros(100)))?;
+    send_4(&[0, 0, 1, 1], data, || {
+        toggle(&enable, Duration::from_micros(100))
+    })?;
 
     // Post RESET 'C' - Device thinks this is 0011 0000, same as 8 bit mode
     send_4(&[0, 0, 1, 1], data, toggle_40ms)?;
@@ -152,8 +165,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut chip = Chip::new(STANDARD_PI_GPIO_DEVICE_PATH)?;
 
     let register_select_line = chip.get_line(REGISTER_SELECT)?;
-    let enable_line = chip.get_line(ENABLE)?;
     let data_lines = chip.get_lines(&[D7, D6, D5, D4])?;
+    let enable_line = chip.get_line(ENABLE)?;
+    let read_write_line = chip.get_line(READ_WRITE_SELECT)?;
 
     println!("Register the output lines...");
     // Note - "consumer names" will be visible via the gpuinfo cli tool
@@ -163,6 +177,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "lcd_rs_data",
     )?;
     let enable_handle = enable_line.request(LineRequestFlags::OUTPUT, DISABLED, "lcd_rs_enable")?;
+    let _ = read_write_line.request(LineRequestFlags::OUTPUT, WRITE, "lcd_rs_read_write")?;
+    // Verified that the board still works ok with the RW line held low via the GPIO pin
 
     println!("Setup the LCD");
     setup_lcd(&register_select_line, &data_handle, &enable_handle)?;
