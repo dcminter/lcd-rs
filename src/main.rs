@@ -50,16 +50,19 @@ fn toggle(line: &LineHandle, duration: Duration) -> Result<(), Box<dyn Error>> {
 
 fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
     values: &[u8; 4],
-    data_handle: &MultiLineHandle,
+    data: &(Line, MultiLineHandle),
     toggler: F,
 ) -> Result<(), Box<dyn Error>> {
-    data_handle.set_values(values)?;
+    // D7 is special... because in INPUT mode it's the busy flag.
+    let d7 = data.0.request(LineRequestFlags::OUTPUT, LOW, "lcd_rs_data_d7")?;
+    d7.set_value(values[0])?;
+    data.1.set_values(&values[1..])?;
     toggler()
 }
 
 fn setup_lcd(
     register_select_line: &Line,
-    data: &MultiLineHandle,
+    data: &(Line, MultiLineHandle),
     enable: &LineHandle,
 ) -> Result<(), Box<dyn Error>> {
     let _ = instruction_register(register_select_line)?;
@@ -114,7 +117,7 @@ fn setup_lcd(
 
 fn send_char(
     character: char,
-    data_handle: &MultiLineHandle,
+    data: &(Line, MultiLineHandle),
     enable_handle: &LineHandle,
 ) -> Result<(), Box<dyn Error>> {
     if character.is_ascii() {
@@ -138,8 +141,8 @@ fn send_char(
 
         let toggler = || toggle(enable_handle, Duration::from_millis(40));
 
-        send_4(&high, data_handle, toggler)?;
-        send_4(&low, data_handle, toggler)?;
+        send_4(&high, data, toggler)?;
+        send_4(&low, data, toggler)?;
     }
 
     Ok(())
@@ -148,13 +151,13 @@ fn send_char(
 fn send_text_to_lcd(
     text: &str,
     register_select_line: &Line,
-    data_handle: &MultiLineHandle,
+    data: &(Line, MultiLineHandle),
     enable_handle: &LineHandle,
 ) -> Result<(), Box<dyn Error>> {
     let _ = data_register(register_select_line)?;
 
     for c in text.chars() {
-        send_char(c, data_handle, enable_handle)?;
+        send_char(c, data, enable_handle)?;
     }
 
     Ok(())
@@ -165,7 +168,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut chip = Chip::new(STANDARD_PI_GPIO_DEVICE_PATH)?;
 
     let register_select_line = chip.get_line(REGISTER_SELECT)?;
-    let data_lines = chip.get_lines(&[D7, D6, D5, D4])?;
+    let d7_data_line = chip.get_line(D7)?;
+    let data_lines = chip.get_lines(&[D6, D5, D4])?;
     let enable_line = chip.get_line(ENABLE)?;
     let read_write_line = chip.get_line(READ_WRITE_SELECT)?;
 
@@ -173,21 +177,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Note - "consumer names" will be visible via the gpuinfo cli tool
     let data_handle = data_lines.request(
         LineRequestFlags::OUTPUT,
-        &[LOW, LOW, LOW, LOW],
+        &[LOW, LOW, LOW],
         "lcd_rs_data",
     )?;
+
+    let data = (d7_data_line, data_handle);
+
     let enable_handle = enable_line.request(LineRequestFlags::OUTPUT, DISABLED, "lcd_rs_enable")?;
     let _ = read_write_line.request(LineRequestFlags::OUTPUT, WRITE, "lcd_rs_read_write")?;
     // Verified that the board still works ok with the RW line held low via the GPIO pin
 
     println!("Setup the LCD");
-    setup_lcd(&register_select_line, &data_handle, &enable_handle)?;
+    setup_lcd(&register_select_line, &data, &enable_handle)?;
 
     println!("Start the text output");
     send_text_to_lcd(
         "Hello, World!",
         &register_select_line,
-        &data_handle,
+        &data,
         &enable_handle,
     )?;
 
