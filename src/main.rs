@@ -56,20 +56,19 @@ fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
 ) -> Result<(), Box<dyn Error>> {
     // D7 is special... because in INPUT mode it's the busy flag.
     {
-        let d7 = data.0.request(LineRequestFlags::OUTPUT, LOW, "lcd_rs_data_d7")?;
-        d7.set_value(values[0])?;
+        let _ = data
+            .0
+            .request(LineRequestFlags::OUTPUT, values[0], "lcd_rs_data_d7")?;
         data.1.set_values(&values[1..])?;
         toggler()
     }?;
 
-/*
-    THIS is the bit that I think may not work; I think the rest should work ok - so let's try
-    without this bit first and see if the behaviour is still ok.
-
     // Flip RW flag into READ mode and read D7 until we get a non-busy state
     read_write_handle.set_value(READ)?;
     {
-        let busy = data.0.request(LineRequestFlags::INPUT, LOW, "lcd_rs_data_busy")?;
+        let busy = data
+            .0
+            .request(LineRequestFlags::INPUT, LOW, "lcd_rs_data_busy")?;
         while busy.get_value()? > 0 {
             println!("Busy");
         }
@@ -80,7 +79,6 @@ fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
     read_write_handle.set_value(WRITE)?;
     // But we're still in WRITE mode...
 
- */
     Ok(())
 }
 
@@ -202,20 +200,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Register the output lines...");
     // Note - "consumer names" will be visible via the gpuinfo cli tool
-    let data_handle = data_lines.request(
-        LineRequestFlags::OUTPUT,
-        &[LOW, LOW, LOW],
-        "lcd_rs_data",
-    )?;
+    let data_handle =
+        data_lines.request(LineRequestFlags::OUTPUT, &[LOW, LOW, LOW], "lcd_rs_data")?;
 
     let data = (d7_data_line, data_handle);
 
     let enable_handle = enable_line.request(LineRequestFlags::OUTPUT, DISABLED, "lcd_rs_enable")?;
-    let read_write_handle = read_write_line.request(LineRequestFlags::OUTPUT, WRITE, "lcd_rs_read_write")?;
+    let read_write_handle =
+        read_write_line.request(LineRequestFlags::OUTPUT, WRITE, "lcd_rs_read_write")?;
     // Verified that the board still works ok with the RW line held low via the GPIO pin
 
     println!("Setup the LCD");
-    setup_lcd(&read_write_handle, &register_select_line, &data, &enable_handle)?;
+    setup_lcd(
+        &read_write_handle,
+        &register_select_line,
+        &data,
+        &enable_handle,
+    )?;
 
     println!("Start the text output");
     send_text_to_lcd(
