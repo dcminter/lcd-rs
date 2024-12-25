@@ -93,6 +93,15 @@ I'm using crate [gpio-cdev](https://crates.io/crates/gpio-cdev) for the followin
   * [Working Group Repos](https://github.com/rust-embedded)
 * Looks like it gets enough eyes for anything nefarious to be spotted
 
+Although, now I'm actually using it, I do have to note the following:
+
+* It's using the [*deprecated* Version 1 of the GPIO Character Space API](https://docs.kernel.org/userspace-api/gpio/chardev_v1.html) 
+rather than the replacement [Version 2](https://docs.kernel.org/userspace-api/gpio/chardev.html)
+* Sometimes it's a bit slavish about echoing some of the Linux docs for the underlying implementation.
+  * For example... the docs for [Line.request](https://docs.rs/gpio-cdev/latest/gpio_cdev/struct.Line.html#method.request) mention 
+that the `default` parameter sets the line value for outputs - but doesn't explain what it does for line *inputs* ! You're left to 
+figure out for yourself that the answer is: it does nothing.
+
 ## Python etc.
 
 The [python script](lcd.py) works ok (albeit slowly). It requires the Python [lgpio library](https://pypi.org/project/lgpio/):

@@ -48,7 +48,7 @@ fn toggle(line: &LineHandle, duration: Duration) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
+fn send_4<F: Fn() -> Result<(), Box<dyn Error>>>(
     values: &[u8; 4],
     data: &(Line, MultiLineHandle),
     read_write_handle: &LineHandle,
@@ -69,8 +69,12 @@ fn send_4<F: FnOnce() -> Result<(), Box<dyn Error>>>(
         let busy = data
             .0
             .request(LineRequestFlags::INPUT, LOW, "lcd_rs_data_busy")?;
+        // TODO: ENABLE here
         while busy.get_value()? > 0 {
             println!("Busy");
+            // TODO: DISABLE HERE
+            // TODO: Wait a moment
+            // TODO: ENABLE HERE
         }
     }
 
