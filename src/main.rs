@@ -48,6 +48,25 @@ fn toggle(line: &LineHandle, duration: Duration) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn send_4_no_busy_handling<F: Fn() -> Result<(), Box<dyn Error>>>(
+    values: &[u8; 4],
+    data: &(Line, MultiLineHandle),
+    toggler: F,
+) -> Result<(), Box<dyn Error>> {
+    // D7 is special... because in INPUT mode it's the busy flag.
+    {
+        let _ = data
+            .0
+            .request(LineRequestFlags::OUTPUT, values[0], "lcd_rs_data_d7")?;
+        data.1.set_values(&values[1..])?;
+        toggler()
+    }?;
+    println!("No busy handling");
+    Ok(())
+}
+
+
+
 fn send_4<F: Fn() -> Result<(), Box<dyn Error>>>(
     values: &[u8; 4],
     data: &(Line, MultiLineHandle),
@@ -87,7 +106,6 @@ fn send_4<F: Fn() -> Result<(), Box<dyn Error>>>(
 }
 
 fn setup_lcd(
-    read_write_handle: &LineHandle,
     register_select_line: &Line,
     data: &(Line, MultiLineHandle),
     enable: &LineHandle,
@@ -101,43 +119,43 @@ fn setup_lcd(
     // Handle post-reset initialization into 4 bit mode
 
     // Post RESET 'A' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 4.1 milliseconds"
-    send_4(&[0, 0, 1, 1], data, read_write_handle, || {
+    send_4_no_busy_handling(&[0, 0, 1, 1], data, || {
         toggle(&enable, Duration::from_micros(4100))
     })?;
 
     // Post RESET 'B' - Device thinks this is 0011 0000, same as 8 bit mode. Wait "more than 100 microseconds"
-    send_4(&[0, 0, 1, 1], data, read_write_handle, || {
+    send_4_no_busy_handling(&[0, 0, 1, 1], data, || {
         toggle(&enable, Duration::from_micros(100))
     })?;
 
     // Post RESET 'C' - Device thinks this is 0011 0000, same as 8 bit mode
-    send_4(&[0, 0, 1, 1], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 1, 1], data, toggle_40ms)?;
 
     // In 8 bit mode this would need to be 0001, in either mode 0010 moves us into 4 bit mode...
-    send_4(&[0, 0, 1, 0], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 1, 0], data, toggle_40ms)?;
 
     ////
     // Now do the actual post-reset 4-bit mode setup (always HI then LO as this is big-endian)
 
     // Function Set  ... DATA LENGTH = 4 bits, LINES = 2, FONT = 5x8
-    send_4(&[0, 0, 1, 0], data, read_write_handle, toggle_40ms)?;
-    send_4(&[1, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 1, 0], data, toggle_40ms)?;
+    send_4_no_busy_handling(&[1, 0, 0, 0], data, toggle_40ms)?;
 
     // Display On/off .. DISPLAY ON, CURSOR OFF, BLINK OFF
-    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
-    send_4(&[1, 1, 0, 0], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4_no_busy_handling(&[1, 1, 0, 0], data, toggle_40ms)?;
 
     // Clear display
-    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
-    send_4(&[0, 0, 0, 1], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 0, 1], data, toggle_40ms)?;
 
     // Set cursor to home position
-    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
-    send_4(&[0, 0, 1, 0], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 1, 0], data, toggle_40ms)?;
 
     // Entry Mode ... INCREMENT, SHIFT = OFF (same as after RESET, could omit this)
-    send_4(&[0, 0, 0, 0], data, read_write_handle, toggle_40ms)?;
-    send_4(&[0, 1, 1, 0], data, read_write_handle, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 0, 0, 0], data, toggle_40ms)?;
+    send_4_no_busy_handling(&[0, 1, 1, 0], data, toggle_40ms)?;
 
     Ok(())
 }
@@ -192,6 +210,35 @@ fn send_text_to_lcd(
     Ok(())
 }
 
+/*
+
+Something like this is going to be clearer:
+
+// 4-bit mode reset sequence
+send_8_bit_mode(DataLines { db7:0, db6:0, db5:1, db4:1 }, FUNCTION_SET_DELAY_RESET_FIRST); // 41000µs
+send_8_bit_mode(DataLines { db7:0, db6:0, db5:1, db4:1 }, FUNCTION_SET_DELAY_RESET_SECOND);// 100µs
+send_8_bit_mode(DataLines { db7:0, db6:0, db5:1, db4:1 }, FUNCTION_SET_DELAY);             // 38µs
+send_8_bit_mode(DataLines { db7:0, db6:0, db5:1, db4:0 }, FUNCTION_SET_DELAY);
+
+// 4 bit mode is enabled now...
+
+// DATA LENGTH = 4 bits, LINES = 2, FONT = 5x8
+send_4_bit_mode(Data { db7:0, db6:0, db5:1, db4:0 }, Data { db7:1, db6:0, db5:0, db4:0 }, FUNCTION_SET_DELAY);
+
+// Display On/off .. DISPLAY ON, CURSOR OFF, BLINK OFF
+send_4_bit_mode(Data { db7:0, db6:0, db5:0, db4:0 }, Data { db7:1, db6:0, db5:0, db4:0 }, DISPLAY_OFF);
+
+// Clear display
+send_4_bit_mode(Data { db7:0, db6:0, db5:0, db4:0 }, Data { db7:0, db6:0, db5:0, db4:1 }, DISPLAY_CLEAR);
+
+// Set cursor to home position
+send_4_bit_mode(Data { db7:0, db6:0, db5:0, db4:0 }, Data { db7:0, db6:0, db5:1, db4:0 }, CURSOR_HOME);
+
+// Entry Mode ... INCREMENT, SHIFT = OFF (same as after RESET, could omit this)
+send_4_bit_mode(Data { db7:0, db6:0, db5:0, db4:0 }, Data { db7:0, db6:1, db5:1, db4:0 }, ENTRY_MODE);
+
+ */
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Get a handle to the GPIO device...");
     let mut chip = Chip::new(STANDARD_PI_GPIO_DEVICE_PATH)?;
@@ -216,7 +263,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Setup the LCD");
     setup_lcd(
-        &read_write_handle,
         &register_select_line,
         &data,
         &enable_handle,
